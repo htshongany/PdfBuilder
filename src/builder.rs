@@ -48,7 +48,7 @@ pub async fn run_build(config: &Config) -> Result<(), AppError> {
 
 fn preprocess_markdown(file_path: &str, visited: &mut HashSet<String>) -> Result<String, AppError> {
     if !visited.insert(file_path.to_string()) {
-        return Err(AppError::BuildError(format!("Dépendance circulaire détectée : '{}'", file_path)));
+        return Err(AppError::BuildError(format!("Dépendance circulaire détectée : '{file_path}'")));
     }
 
     #[cfg(not(test))]
@@ -127,7 +127,7 @@ fn build_html(config: &Config, markdown_content: &str) -> Result<(String, PathBu
             DEFAULT_THEME_CSS.to_string()
         }
     };
-    let mut final_css = format!("{}\n{}", theme_css, syntax_theme_css);
+    let mut final_css = format!("{theme_css}\n{syntax_theme_css}");
 
     if let Some(custom_css_path_str) = &config.custom_css {
         if !custom_css_path_str.is_empty() {
@@ -161,7 +161,7 @@ async fn build_pdf_from_html(_html_content: &str, html_path: &Path) -> Result<()
     pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
     let browser_path = find_browser_executable()?;
-    let browser = Browser::new(LaunchOptions { path: Some(browser_path), ..Default::default() }).map_err(|e| AppError::BuildError(format!("Impossible de lancer le navigateur : {}", e)))?;
+    let browser = Browser::new(LaunchOptions { path: Some(browser_path), ..Default::default() }).map_err(|e| AppError::BuildError(format!("Impossible de lancer le navigateur : {e}")))?;
     let tab = browser.new_tab().map_err(|e| AppError::BuildError(e.to_string()))?;
 
     let app = Router::new().nest_service("/", get_service(ServeDir::new("build")));
@@ -229,11 +229,12 @@ output:
     #[cfg(not(test))]
     println!("{}", "Fichier 'config.yaml' créé.".green());
 
-    let main_md_content = format!(r#"# {}
-Par {}
+    let main_md_content = format!(r#"# {default_title}
+Par {default_author}
 Bienvenue !
 !include(chapitres/chapitre1.md)
-"#, default_title, default_author);
+"#,
+    );
     fs::write("main.md", main_md_content)?;
     #[cfg(not(test))]
     println!("{}", "Fichier 'main.md' créé.".green());
