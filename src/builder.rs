@@ -62,27 +62,41 @@ fn preprocess_markdown(project_root: &Path, file_path: &str, visited: &mut HashS
     let include_re = Regex::new(r"^\s*!include\(([^)]+)\)\s*$").map_err(|e| AppError::BuildError(e.to_string()))?;
 
     let mut full_content = String::new();
-    for line in content.lines() {
-        if let Some(caps) = include_re.captures(line) {
-            let include_path_str = caps.get(1).unwrap().as_str();
-            
-            let base_path = Path::new(file_path).parent().unwrap_or_else(|| Path::new(""));
-            let include_path = base_path.join(include_path_str);
-            
-            // --- Security: Path Traversal Check ---
-            // Normalize the path to resolve '..' and ensure it's absolute.
-            let canonical_path = path_clean::clean(include_path.to_str().unwrap());
-            let canonical_path = project_root.join(canonical_path);
+    let mut in_code_block = false;
 
-            // Verify that the canonical path is still within the project root.
-            if !canonical_path.starts_with(project_root) {
-                return Err(AppError::BuildError(format!("Unauthorized file access attempt: {}", include_path.display())));
+    for line in content.lines() {
+        if line.trim().starts_with("```") {
+            in_code_block = !in_code_block;
+        }
+
+        if !in_code_block {
+            if include_re.is_match(line) {
+                if let Some(caps) = include_re.captures(line) {
+                    let include_path_str = caps.get(1).unwrap().as_str();
+                    
+                    let base_path = Path::new(file_path).parent().unwrap_or_else(|| Path::new(""));
+                    let include_path = base_path.join(include_path_str);
+                    
+                    // --- Security: Path Traversal Check ---
+                    let canonical_path = path_clean::clean(include_path.to_str().unwrap());
+                    let canonical_path = project_root.join(canonical_path);
+
+                    if !canonical_path.starts_with(project_root) {
+                        return Err(AppError::BuildError(format!("Unauthorized file access attempt: {}", include_path.display())));
+                    }
+                    // --- End of check ---
+                    
+                    let included_content = preprocess_markdown(project_root, include_path.to_str().unwrap_or(""), visited)?;
+                    full_content.push_str(&included_content);
+                    full_content.push('\n');
+                }
+            } else if line.trim() == "!newpage" {
+                // Replace the directive with a div for the page break
+                full_content.push_str("<div class=\"page-break\"></div>\n");
+            } else {
+                full_content.push_str(line);
+                full_content.push('\n');
             }
-            // --- End of check ---
-            
-            let included_content = preprocess_markdown(project_root, include_path.to_str().unwrap_or(""), visited)?;
-            full_content.push_str(&included_content);
-            full_content.push('\n');
         } else {
             full_content.push_str(line);
             full_content.push('\n');
@@ -104,13 +118,11 @@ fn build_html(config: &Config, markdown_content: &str) -> Result<(String, PathBu
     let ts = ThemeSet::load_defaults();
     let theme = ts.themes.get(&config.syntax_theme).ok_or_else(|| AppError::BuildError(format!("Syntax theme '{}' not found", config.syntax_theme)))?;
 
-    let processed_markdown = markdown_content.replace("<page_br>", "\n<div class=\"page-break\"></div>\n");
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES | Options::ENABLE_FOOTNOTES | Options::ENABLE_TASKLISTS);
-    let parser = Parser::new_ext(&processed_markdown, options);
+    let parser = Parser::new_ext(markdown_content, options);
     let mut body_html = String::new();
     html::push_html(&mut body_html, parser);
-    body_html = body_html.replace("&lt;div class=\"page-break\"&gt;&lt;/div&gt;", "<div class=\"page-break\"></div>");
 
     // Fix relative image paths
     let img_re = Regex::new(r#"<img src=\".\\./([^\"]+)\""#).map_err(|e| AppError::BuildError(e.to_string()))?;
@@ -161,7 +173,7 @@ fn build_html(config: &Config, markdown_content: &str) -> Result<(String, PathBu
         }
     }
 
-    let final_html = format!(r#"<!DOCTYPE html><html lang="{}"><head><meta charset="UTF-8"><title>{}</title><meta name="author" content="{}"><style>{}</style></head><body><main>{}</main></body></html>"#, config.language, config.title, config.author, final_css, body_html);
+    let final_html = format!(r#"<!DOCTYPE html><html lang="{}"><head><meta charset="UTF-8"><title>{}</title><meta name="author" content="{}"><style>{}</style></head><body><main>{}</main></body></html>"# , config.language, config.title, config.author, final_css, body_html);
     fs::write(&output_html_path, &final_html)?;
     
     #[cfg(not(test))]
@@ -406,5 +418,40 @@ mod tests {
         
         // Cleanup the secret file
         fs::remove_file(outside_file_path).unwrap();
+    }
+
+    #[test]
+    fn test_preprocess_markdown_ignores_include_in_code_block() {
+        let test_dir = TestDir::new("preprocess_ignore_in_code");
+        let main_path = test_dir.path().join("main.md");
+        let content = "Example:\n```\n!include(some/file.md)\n```";
+        fs::write(&main_path, content).unwrap();
+
+        let result = preprocess_markdown(test_dir.path(), main_path.to_str().unwrap(), &mut HashSet::new()).unwrap();
+        assert!(result.contains("!include(some/file.md)"));
+    }
+
+    #[test]
+    fn test_preprocess_markdown_ignores_newpage_in_code_block() {
+        let test_dir = TestDir::new("preprocess_ignore_newpage_in_code");
+        let main_path = test_dir.path().join("main.md");
+        let content = "Example:\n```\n!newpage\n```";
+        fs::write(&main_path, content).unwrap();
+
+        let result = preprocess_markdown(test_dir.path(), main_path.to_str().unwrap(), &mut HashSet::new()).unwrap();
+        assert!(result.contains("!newpage"));
+        assert!(!result.contains("<div class=\"page-break\"></div>"));
+    }
+
+    #[test]
+    fn test_preprocess_markdown_handles_newpage() {
+        let test_dir = TestDir::new("preprocess_newpage");
+        let main_path = test_dir.path().join("main.md");
+        let content = "Line 1\n!newpage\nLine 2";
+        fs::write(&main_path, content).unwrap();
+
+        let result = preprocess_markdown(test_dir.path(), main_path.to_str().unwrap(), &mut HashSet::new()).unwrap();
+        assert!(result.contains("<div class=\"page-break\"></div>"));
+        assert!(!result.contains("!newpage"));
     }
 }
