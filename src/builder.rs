@@ -16,7 +16,7 @@ use syntect::html::{css_for_theme_with_class_style, highlighted_html_for_string,
 use syntect::parsing::SyntaxSet;
 use tower_http::services::ServeDir;
 
-const DEFAULT_THEME_CSS: &str = r#"/* Thème Dark Simple */
+const DEFAULT_THEME_CSS: &str = r#"/* Simple Dark Theme */
 body { background-color: #1a1a1a; color: #f2f2f2; font-family: sans-serif; line-height: 1.6; padding: 2em; }
 h1, h2, h3 { color: #ffa500; }
 code { background-color: #2a2a2a; padding: 2px 4px; border-radius: 4px; }
@@ -30,7 +30,11 @@ pre { background-color: #2a2a2a; padding: 1em; border-radius: 8px; overflow-x: a
 }"#;
 
 pub async fn run_build(config: &Config) -> Result<(), AppError> {
-    let full_markdown = preprocess_markdown(&config.source, &mut HashSet::new())?;
+    // Define the project root as the current working directory.
+    // All file operations will be relative to this root.
+    let project_root = std::env::current_dir()?;
+    
+    let full_markdown = preprocess_markdown(&project_root, &config.source, &mut HashSet::new())?;
     let assets_source_dir = PathBuf::from("assets");
     let assets_dest_dir = PathBuf::from("build").join("assets");
     copy_assets_optimized(&assets_source_dir, &assets_dest_dir)?;
@@ -38,21 +42,21 @@ pub async fn run_build(config: &Config) -> Result<(), AppError> {
     build_pdf_from_html(&html_content, &output_html_path).await?;
 
     println!("\n{}", "--------------------------------------------------".green());
-    println!("{} ", "Construction terminée avec succès !".green());
-    println!("{} {}", "Fichier HTML généré :".cyan(), output_html_path.display().to_string().yellow());
-    println!("{} {}", "Fichier PDF généré  :".cyan(), output_html_path.with_extension("pdf").display().to_string().yellow());
+    println!("{} ", "Build completed successfully!".green());
+    println!("{} {}", "Generated HTML file:".cyan(), output_html_path.display().to_string().yellow());
+    println!("{} {}", "Generated PDF file:".cyan(), output_html_path.with_extension("pdf").display().to_string().yellow());
     println!("{} ", "--------------------------------------------------".green());
 
     Ok(())
 }
 
-fn preprocess_markdown(file_path: &str, visited: &mut HashSet<String>) -> Result<String, AppError> {
+fn preprocess_markdown(project_root: &Path, file_path: &str, visited: &mut HashSet<String>) -> Result<String, AppError> {
     if !visited.insert(file_path.to_string()) {
-        return Err(AppError::BuildError(format!("Dépendance circulaire détectée : '{file_path}'")));
+        return Err(AppError::BuildError(format!("Circular dependency detected: '{file_path}'")));
     }
 
     #[cfg(not(test))]
-    println!("{} {}", "Traitement de :".blue(), file_path.yellow());
+    println!("{} {}", "Processing:".blue(), file_path.yellow());
     
     let content = fs::read_to_string(file_path).map_err(|_| AppError::SourceNotFound(file_path.to_string()))?;
     let include_re = Regex::new(r"^\s*!include\(([^)]+)\)\s*$").map_err(|e| AppError::BuildError(e.to_string()))?;
@@ -65,7 +69,18 @@ fn preprocess_markdown(file_path: &str, visited: &mut HashSet<String>) -> Result
             let base_path = Path::new(file_path).parent().unwrap_or_else(|| Path::new(""));
             let include_path = base_path.join(include_path_str);
             
-            let included_content = preprocess_markdown(include_path.to_str().unwrap_or(""), visited)?;
+            // --- Security: Path Traversal Check ---
+            // Normalize the path to resolve '..' and ensure it's absolute.
+            let canonical_path = path_clean::clean(include_path.to_str().unwrap());
+            let canonical_path = project_root.join(canonical_path);
+
+            // Verify that the canonical path is still within the project root.
+            if !canonical_path.starts_with(project_root) {
+                return Err(AppError::BuildError(format!("Unauthorized file access attempt: {}", include_path.display())));
+            }
+            // --- End of check ---
+            
+            let included_content = preprocess_markdown(project_root, include_path.to_str().unwrap_or(""), visited)?;
             full_content.push_str(&included_content);
             full_content.push('\n');
         } else {
@@ -78,7 +93,7 @@ fn preprocess_markdown(file_path: &str, visited: &mut HashSet<String>) -> Result
 
 fn build_html(config: &Config, markdown_content: &str) -> Result<(String, PathBuf), AppError> {
     #[cfg(not(test))]
-    println!("{}", "Démarrage de la construction HTML...".blue());
+    println!("{}", "Starting HTML build...".blue());
     let build_dir = Path::new("build");
     fs::create_dir_all(build_dir)?;
 
@@ -87,7 +102,7 @@ fn build_html(config: &Config, markdown_content: &str) -> Result<(String, PathBu
 
     let ss = SyntaxSet::load_defaults_newlines();
     let ts = ThemeSet::load_defaults();
-    let theme = ts.themes.get(&config.syntax_theme).ok_or_else(|| AppError::BuildError(format!("Thème de syntaxe '{}' introuvable", config.syntax_theme)))?;
+    let theme = ts.themes.get(&config.syntax_theme).ok_or_else(|| AppError::BuildError(format!("Syntax theme '{}' not found", config.syntax_theme)))?;
 
     let processed_markdown = markdown_content.replace("<page_br>", "\n<div class=\"page-break\"></div>\n");
     let mut options = Options::empty();
@@ -97,7 +112,7 @@ fn build_html(config: &Config, markdown_content: &str) -> Result<(String, PathBu
     html::push_html(&mut body_html, parser);
     body_html = body_html.replace("&lt;div class=\"page-break\"&gt;&lt;/div&gt;", "<div class=\"page-break\"></div>");
 
-    // Corriger les chemins d'images relatifs
+    // Fix relative image paths
     let img_re = Regex::new(r#"<img src=\".\\./([^\"]+)\""#).map_err(|e| AppError::BuildError(e.to_string()))?;
     body_html = img_re.replace_all(&body_html, r#"<img src=\"$1\""#).to_string();
 
@@ -118,29 +133,29 @@ fn build_html(config: &Config, markdown_content: &str) -> Result<(String, PathBu
     let theme_css = match fs::read_to_string(&theme_css_path) {
         Ok(s) => {
             #[cfg(not(test))]
-            println!("{} {}", "Utilisation du thème CSS personnalisé :".cyan(), theme_css_path.display().to_string().yellow());
+            println!("{} {}", "Using custom CSS theme:".cyan(), theme_css_path.display().to_string().yellow());
             s
         }
         Err(_) => {
             #[cfg(not(test))]
-            println!("{} {}{}", "Thème CSS personnalisé non trouvé à".yellow(), theme_css_path.display().to_string().yellow(), ". Utilisation du thème par défaut.".yellow());
+            println!("{} {}{}", "Custom CSS theme not found at".yellow(), theme_css_path.display().to_string().yellow(), ". Using default theme.".yellow());
             DEFAULT_THEME_CSS.to_string()
         }
     };
-    let mut final_css = format!("{theme_css}\n{syntax_theme_css}");
+    let mut final_css = format!("{}\n{}", theme_css, syntax_theme_css);
 
     if let Some(custom_css_path_str) = &config.custom_css {
         if !custom_css_path_str.is_empty() {
             match fs::read_to_string(custom_css_path_str) {
                 Ok(s) => {
                     #[cfg(not(test))]
-                    println!("{} {}", "Utilisation du fichier CSS personnalisé :".cyan(), custom_css_path_str.yellow());
+                    println!("{} {}", "Using custom CSS file:".cyan(), custom_css_path_str.yellow());
                     final_css.push_str("\n\n/* Custom CSS */\n");
                     final_css.push_str(&s);
                 }
                 Err(_) => {
                     #[cfg(not(test))]
-                    println!("{} '{}' {}.", "Attention : Fichier CSS personnalisé non trouvé à".yellow(), custom_css_path_str.yellow(), "Ignoré".yellow())
+                    println!("{} '{}' {}.", "Warning: Custom CSS file not found at".yellow(), custom_css_path_str.yellow(), "Ignored".yellow())
                 },
             }
         }
@@ -150,18 +165,18 @@ fn build_html(config: &Config, markdown_content: &str) -> Result<(String, PathBu
     fs::write(&output_html_path, &final_html)?;
     
     #[cfg(not(test))]
-    println!("{} {}", "HTML autonome généré :".green(), output_html_path.display().to_string().yellow());
+    println!("{} {}", "Standalone HTML generated:".green(), output_html_path.display().to_string().yellow());
 
     Ok((final_html, output_html_path))
 }
 
 async fn build_pdf_from_html(_html_content: &str, html_path: &Path) -> Result<(), AppError> {
     let pb = ProgressBar::new_spinner();
-    pb.set_message(format!("{}", "Lancement de la conversion PDF...".blue()));
+    pb.set_message(format!("{}", "Starting PDF conversion...".blue()));
     pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
     let browser_path = find_browser_executable()?;
-    let browser = Browser::new(LaunchOptions { path: Some(browser_path), ..Default::default() }).map_err(|e| AppError::BuildError(format!("Impossible de lancer le navigateur : {e}")))?;
+    let browser = Browser::new(LaunchOptions { path: Some(browser_path), ..Default::default() }).map_err(|e| AppError::BuildError(format!("Could not launch browser: {e}")))?;
     let tab = browser.new_tab().map_err(|e| AppError::BuildError(e.to_string()))?;
 
     let app = Router::new().nest_service("/", get_service(ServeDir::new("build")));
@@ -175,15 +190,15 @@ async fn build_pdf_from_html(_html_content: &str, html_path: &Path) -> Result<()
     });
 
     let local_url = format!("http://127.0.0.1:{}/{}", actual_port, html_path.file_name().unwrap().to_str().unwrap());
-    pb.set_message(format!("{} {}", "Navigation vers :".blue(), local_url.yellow()));
+    pb.set_message(format!("{} {}", "Navigating to:".blue(), local_url.yellow()));
     tab.navigate_to(&local_url).map_err(|e| AppError::BuildError(e.to_string()))?;
     tab.wait_for_element("body").map_err(|e| AppError::BuildError(e.to_string()))?;
 
-    pb.set_message(format!("{}", "Génération du PDF...".blue()));
+    pb.set_message(format!("{}", "Generating PDF...".blue()));
     let pdf_path = html_path.with_extension("pdf");
     let pdf_data = tab.print_to_pdf(None).map_err(|e| AppError::BuildError(e.to_string()))?;
     fs::write(&pdf_path, pdf_data)?;
-    pb.finish_with_message(format!("{} {}", "PDF généré : ".green(), pdf_path.display().to_string().yellow()));
+    pb.finish_with_message(format!("{} {}", "PDF generated: ".green(), pdf_path.display().to_string().yellow()));
 
     shutdown_tx.send(()).ok();
     server_task.await.map_err(|e| AppError::BuildError(e.to_string()))?;
@@ -204,16 +219,16 @@ fn find_browser_executable() -> Result<PathBuf, AppError> {
             return Ok(p);
         }
     }
-    Err(AppError::BuildError("Aucun navigateur compatible (Chrome, Edge) n'a été trouvé.".to_string()))
+    Err(AppError::BuildError("No compatible browser (Chrome, Edge) was found.".to_string()))
 }
 
 pub fn init_project(title: Option<String>, author: Option<String>, language: Option<String>) -> Result<(), AppError> {
     #[cfg(not(test))]
-    println!("{}", "Initialisation d'un nouveau projet...".blue());
+    println!("{}", "Initializing a new project...".blue());
 
-    let default_title = title.unwrap_or_else(|| "Mon Super Ebook".to_string());
-    let default_author = author.unwrap_or_else(|| "Votre Nom".to_string());
-    let default_language = language.unwrap_or_else(|| "fr".to_string());
+    let default_title = title.unwrap_or_else(|| "My Awesome PDF".to_string());
+    let default_author = author.unwrap_or_else(|| "Your Name".to_string());
+    let default_language = language.unwrap_or_else(|| "en".to_string());
 
     let config_content = format!(r#"title: "{}"
 author: "{}"
@@ -227,31 +242,32 @@ output:
 "#, default_title, default_author, default_language, default_title.to_lowercase().replace(" ", "-"));
     fs::write("config.yaml", config_content)?;
     #[cfg(not(test))]
-    println!("{}", "Fichier 'config.yaml' créé.".green());
+    println!("{}", "'config.yaml' file created.".green());
 
-    let main_md_content = format!(r#"# {default_title}
-Par {default_author}
-Bienvenue !
-!include(chapitres/chapitre1.md)
+    let main_md_content = format!(r#"# {}
+By {}
+Welcome!
+!include(chapters/chapter1.md)
 "#,
+    default_title, default_author
     );
     fs::write("main.md", main_md_content)?;
     #[cfg(not(test))]
-    println!("{}", "Fichier 'main.md' créé.".green());
+    println!("{}", "'main.md' file created.".green());
 
-    fs::create_dir_all("chapitres")?;
-    fs::write("chapitres/chapitre1.md", "## Chapitre 1\n\nContenu du chapitre 1.")?;
+    fs::create_dir_all("chapters")?;
+    fs::write("chapters/chapter1.md", "## Chapter 1\n\nContent of chapter 1.")?;
     #[cfg(not(test))]
-    println!("{}", "Dossier 'chapitres/' et 'chapitres/chapitre1.md' créés.".green());
+    println!("{}", "'chapters/' directory and 'chapters/chapter1.md' created.".green());
 
     fs::create_dir_all("assets")?;
     #[cfg(not(test))]
-    println!("{}", "Dossier 'assets/' créé.".green());
+    println!("{}", "'assets/' directory created.".green());
 
     #[cfg(not(test))]
-    println!("\n{}", "Projet initialisé avec succès !".green());
+    println!("\n{}", "Project initialized successfully!".green());
     #[cfg(not(test))]
-    println!("{} {}", "Pour compiler, exécutez:".cyan(), "ebookbuilder build".yellow());
+    println!("{} {}", "To build, run:".cyan(), "PdfBuilder build".yellow());
 
     Ok(())
 }
@@ -262,7 +278,7 @@ fn copy_assets_optimized(source_dir: &Path, dest_dir: &Path) -> Result<(), AppEr
     }
     fs::create_dir_all(dest_dir)?;
     #[cfg(not(test))]
-    println!("{} {} {} {}...", "Copie des assets de".blue(), source_dir.display().to_string().yellow(), "vers".blue(), dest_dir.display().to_string().yellow());
+    println!("{} {} {} {}...", "Copying assets from".blue(), source_dir.display().to_string().yellow(), "to".blue(), dest_dir.display().to_string().yellow());
 
     for entry in fs::read_dir(source_dir)? {
         let entry = entry?;
@@ -294,7 +310,7 @@ mod tests {
 
     impl TestDir {
         fn new(test_name: &str) -> Self {
-            let path = std::env::temp_dir().join("ebookbuilder_tests").join(test_name);
+            let path = std::env::temp_dir().join("pdfbuilder_tests").join(test_name);
             if path.exists() {
                 fs::remove_dir_all(&path).unwrap();
             }
@@ -317,7 +333,7 @@ mod tests {
 
         assert!(Path::new("config.yaml").exists());
         assert!(Path::new("main.md").exists());
-        assert!(Path::new("chapitres/chapitre1.md").exists());
+        assert!(Path::new("chapters/chapter1.md").exists());
         assert!(Path::new("assets").is_dir());
 
         std::env::set_current_dir(original_dir).unwrap();
@@ -329,7 +345,7 @@ mod tests {
         let file_path = test_dir.path().join("main.md");
         fs::write(&file_path, "Hello World").unwrap();
 
-        let result = preprocess_markdown(file_path.to_str().unwrap(), &mut HashSet::new()).unwrap();
+        let result = preprocess_markdown(test_dir.path(), file_path.to_str().unwrap(), &mut HashSet::new()).unwrap();
         assert_eq!(result.trim(), "Hello World");
     }
 
@@ -339,12 +355,12 @@ mod tests {
         let main_path = test_dir.path().join("main.md");
         let chap1_path = test_dir.path().join("chap1.md");
 
-        fs::write(&main_path, "Livre\n!include(chap1.md)").unwrap();
-        fs::write(&chap1_path, "Contenu du chapitre 1").unwrap();
+        fs::write(&main_path, "Book\n!include(chap1.md)").unwrap();
+        fs::write(&chap1_path, "Content of chapter 1").unwrap();
 
-        let result = preprocess_markdown(main_path.to_str().unwrap(), &mut HashSet::new()).unwrap();
-        assert!(result.contains("Livre"));
-        assert!(result.contains("Contenu du chapitre 1"));
+        let result = preprocess_markdown(test_dir.path(), main_path.to_str().unwrap(), &mut HashSet::new()).unwrap();
+        assert!(result.contains("Book"));
+        assert!(result.contains("Content of chapter 1"));
     }
 
     #[test]
@@ -356,7 +372,7 @@ mod tests {
         fs::write(&a_path, "!include(b.md)").unwrap();
         fs::write(&b_path, "!include(a.md)").unwrap();
 
-        let result = preprocess_markdown(a_path.to_str().unwrap(), &mut HashSet::new());
+        let result = preprocess_markdown(test_dir.path(), a_path.to_str().unwrap(), &mut HashSet::new());
         assert!(matches!(result, Err(AppError::BuildError(_))));
     }
 
@@ -366,7 +382,29 @@ mod tests {
         let main_path = test_dir.path().join("main.md");
         fs::write(&main_path, "!include(nonexistent.md)").unwrap();
 
-        let result = preprocess_markdown(main_path.to_str().unwrap(), &mut HashSet::new());
+        let result = preprocess_markdown(test_dir.path(), main_path.to_str().unwrap(), &mut HashSet::new());
         assert!(matches!(result, Err(AppError::SourceNotFound(_))));
+    }
+
+    #[test]
+    fn test_preprocess_markdown_path_traversal() {
+        let test_dir = TestDir::new("preprocess_traversal");
+        let project_dir = test_dir.path();
+        
+        // This file is outside the test project's "root", even if it's in the global test folder.
+        let outside_file_path = std::env::temp_dir().join("secret.txt");
+        fs::write(&outside_file_path, "secret content").unwrap();
+
+        // The include path tries to go up the directory tree.
+        let main_md_path = project_dir.join("main.md");
+        // Use a relative path that would break out of the project root
+        let traversal_path = if cfg!(windows) { "..\\..\\secret.txt" } else { "../../secret.txt" };
+        fs::write(&main_md_path, format!("!include({})", traversal_path)).unwrap();
+
+        let result = preprocess_markdown(project_dir, main_md_path.to_str().unwrap(), &mut HashSet::new());
+        assert!(matches!(result, Err(AppError::BuildError(_))));
+        
+        // Cleanup the secret file
+        fs::remove_file(outside_file_path).unwrap();
     }
 }

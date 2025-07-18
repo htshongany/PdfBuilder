@@ -2,27 +2,21 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AppError {
-    // #[error("Configuration 'config.yaml' introuvable. Exécutez 'init' pour commencer.")]
-    // ConfigNotFound(#[source] std::io::Error),
-
-    #[error("Erreur de lecture du fichier de configuration 'config.yaml'.")]
+    #[error("Error reading the 'config.yaml' configuration file.")]
     ConfigReadError(#[source] std::io::Error),
 
-    #[error("Le format de 'config.yaml' est invalide : {0}")]
+    #[error("The format of 'config.yaml' is invalid: {0}")]
     ConfigParseError(#[from] serde_yaml::Error),
 
-    #[error("Le fichier source '{0}' spécifié dans 'config.yaml' est introuvable.")]
+    #[error("The source file '{0}' specified in 'config.yaml' was not found.")]
     SourceNotFound(String),
 
-    #[error("Le projet existe déjà. 'init' ne peut être exécuté que dans un dossier non initialisé.")]
+    #[error("The project already exists. 'init' can only be run in an uninitialized directory.")]
     ProjectAlreadyExists,
 
-    #[error("Erreur d'entrée/sortie : {0}")]
+    #[error("I/O Error: {0}")]
     IoError(#[from] std::io::Error),
 
-    #[error("Erreur lors de la construction de l'ebook : {0}")]
+    #[error("Error while building the ebook: {0}")]
     BuildError(String),
-
-    // #[error("Erreur lors de l'initialisation du projet : {0}")]
-    // InitError(String),
 }

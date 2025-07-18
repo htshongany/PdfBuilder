@@ -20,4 +20,6 @@ colored = "2.1.0"
 indicatif = "0.17.8"
 thiserror = "1.0.61"
 notify = "6.1.1"
+path-clean = "1.0.1"
+clearscreen = "4.0.2"
 
