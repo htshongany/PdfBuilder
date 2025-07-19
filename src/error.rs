@@ -17,6 +17,6 @@ pub enum AppError {
     #[error("I/O Error: {0}")]
     IoError(#[from] std::io::Error),
 
-    #[error("Error while building the ebook: {0}")]
+    #[error("Error while building the document: {0}")]
     BuildError(String),
 }
