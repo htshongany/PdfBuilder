@@ -99,6 +99,12 @@ p { text-align: justify; margin-bottom: 1em; }
     margin-right: 1em;
 }
 
+.toc-entry-dots {
+    flex-grow: 1;
+    border-bottom: 2px dotted #666;
+    margin-left: 1em;
+}
+
 .page-break { 
     page-break-before: always !important; 
     height: 0; 
@@ -385,6 +391,7 @@ fn generate_toc_entry_html(html: &mut String, entry: &TocEntry) {
     html.push_str(&format!(
         r#"<div class="{}">
     <span class="toc-entry-title">{}</span>
+    <span class="toc-entry-dots"></span>
 </div>"#,
         class_name, entry.title
     ));
@@ -827,7 +834,7 @@ mod tests {
       assert!(html.contains("toc-entry-h2"));
       assert!(!html.contains("5"));
       assert!(!html.contains("6"));
-      assert!(!html.contains("toc-entry-dots"));
+      assert!(html.contains("toc-entry-dots"));
   }
 
   #[test]
