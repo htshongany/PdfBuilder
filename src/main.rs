@@ -21,11 +21,11 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Builds the PDF. Use --watch to automatically recompile on changes.
+    /// Builds the PDF.
     Build {
         /// Enables "watch" mode to automatically recompile on changes.
         #[arg(long)]
-        watch: bool,
+        watch: Option<bool>,
     },
     /// Initializes a new project with the base files.
     Init {
@@ -78,7 +78,7 @@ async fn run() -> Result<(), AppError> {
             // First build
             builder::run_build(&config).await?;
 
-            if *watch {
+            if watch.unwrap_or(false) {
                 println!("\n{}", "--------------------------------------------------".purple());
                 println!("{}", "Watch mode enabled. Waiting for changes...".purple());
                 println!("{}", "Press Ctrl+C to exit.".purple());
