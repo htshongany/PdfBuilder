@@ -13,7 +13,7 @@ use notify::{Config as NotifyConfig, Event, RecommendedWatcher, RecursiveMode, W
 
 /// A simple and fast PDF builder from Markdown.
 #[derive(Parser, Debug)]
-#[command(version, about, long_about = None, short_flag = 'v')]
+#[command(author, version, about, long_about = None, short_flag = 'v', long_flag = "version")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -21,11 +21,11 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Builds the PDF.
+    /// Builds the PDF. Use --watch to automatically rebuild on file changes.
     Build {
         /// Enables "watch" mode to automatically recompile on changes.
         #[arg(long)]
-        watch: Option<bool>,
+        watch: bool,
     },
     /// Initializes a new project with the base files.
     Init {
@@ -107,7 +107,7 @@ async fn run() -> Result<(), AppError> {
             // First build
             builder::run_build(&config).await?;
 
-            if watch.unwrap_or(false) {
+            if *watch {
                 println!("\n{}", "--------------------------------------------------".purple());
                 println!("{}", "Watch mode enabled. Waiting for changes...".purple());
                 println!("{}", "Press Ctrl+C to exit.".purple());
