@@ -13,7 +13,7 @@ use notify::{Config as NotifyConfig, Event, RecommendedWatcher, RecursiveMode, W
 
 /// A simple and fast PDF builder from Markdown.
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None, short_flag = 'v', long_flag = "version")]
+#[command(version, about, long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
