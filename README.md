@@ -35,6 +35,11 @@ A simple CLI tool to convert **Markdown to PDF**, fast and with style. It uses a
 git clone https://github.com/htshongany/PdfBuilder
 cd PdfBuilder
 ```
+### Install dependencies
+
+```bash
+cargo install --path .
+```
 
 ###  Initialize a new project
 
