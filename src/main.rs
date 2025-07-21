@@ -39,6 +39,33 @@ enum Commands {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MarginsConfig {
+    #[serde(default = "default_margin")]
+    pub top: f64,
+    #[serde(default = "default_margin")]
+    pub bottom: f64,
+    #[serde(default = "default_margin")]
+    pub left: f64,
+    #[serde(default = "default_margin")]
+    pub right: f64,
+}
+
+fn default_margin() -> f64 {
+    1.0
+}
+
+impl Default for MarginsConfig {
+    fn default() -> Self {
+        Self {
+            top: default_margin(),
+            bottom: default_margin(),
+            left: default_margin(),
+            right: default_margin(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
     pub title: String,
     pub author: String,
@@ -48,6 +75,8 @@ pub struct Config {
     pub source: String,
     pub custom_css: Option<String>,
     pub output: OutputConfig,
+    #[serde(default)]
+    pub margins: MarginsConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

@@ -201,7 +201,7 @@ pub async fn run_build(config: &Config) -> Result<(), AppError> {
     let assets_dest_dir = PathBuf::from("build").join("assets");
     copy_assets_optimized(&assets_source_dir, &assets_dest_dir)?;
     let (html_content, output_html_path) = build_html(config, &full_markdown)?;
-    build_pdf_from_html(&html_content, &output_html_path).await?;
+    build_pdf_from_html(&html_content, &output_html_path, config).await?;
 
     println!("\n{}", "--------------------------------------------------".green());
     println!("{} ", "Build completed successfully!".green());
@@ -485,7 +485,7 @@ fn build_html(config: &Config, markdown_content: &str) -> Result<(String, PathBu
     Ok((final_html, output_html_path))
 }
 
-async fn build_pdf_from_html(_html_content: &str, html_path: &Path) -> Result<(), AppError> {
+async fn build_pdf_from_html(_html_content: &str, html_path: &Path, config: &Config) -> Result<(), AppError> {
     let pb = ProgressBar::new_spinner();
     pb.set_message(format!("{}", "Starting PDF conversion...".blue()));
     pb.enable_steady_tick(std::time::Duration::from_millis(100));
@@ -516,6 +516,10 @@ async fn build_pdf_from_html(_html_content: &str, html_path: &Path) -> Result<()
         display_header_footer: Some(true),
         header_template: Some("<span></span>".to_string()),
         footer_template: Some(r#"<div style="font-size:10px; margin-right: 1cm; text-align: right; width: 100%;"><span class="pageNumber page-number"></span></div>"#.to_string()),
+        margin_top: Some(config.margins.top),
+        margin_bottom: Some(config.margins.bottom),
+        margin_left: Some(config.margins.left),
+        margin_right: Some(config.margins.right),
         ..Default::default()
     };
 
@@ -562,6 +566,12 @@ source: "main.md"
 custom_css: ""
 output:
   filename: "{}"
+# Margins in inches (optional)
+# margins:
+#   top: 1.0
+#   bottom: 1.0
+#   left: 1.0
+#   right: 1.0
 "#, default_title, default_author, default_language, default_title.to_lowercase().replace(" ", "-"));
     fs::write("config.yaml", config_content)?;
     #[cfg(not(test))]
